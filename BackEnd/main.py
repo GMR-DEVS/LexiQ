@@ -63,6 +63,7 @@ def tokenize(text: str) -> list:
     return tokens
 
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 3 — DICTIONARY API CHECK
 # Call the Free Dictionary API for the given word.
@@ -99,15 +100,9 @@ def check_word_in_api(word: str):
 
 
 
-
-# Checked Code TIll here-------------------------------------------------------------------------------------------
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 4 — LEVENSHTEIN DISTANCE
-# Manual implementation — no external spell-check library used.
 # Calculates the minimum number of insertions, deletions, or substitutions
-# needed to turn word1 into word2.
 # ─────────────────────────────────────────────────────────────────────────────
 def levenshtein_distance(word1: str, word2: str) -> int:
     # Make word1 the shorter one to save memory
@@ -132,14 +127,16 @@ def levenshtein_distance(word1: str, word2: str) -> int:
     return prev_row[len(word2)]
 
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 5 — CANDIDATE GENERATION
 # Compare the misspelled word against every word in the NLTK word list.
-# Keep only words whose Levenshtein distance is within MAX_EDIT_DISTANCE.
-# A quick length pre-filter avoids computing distance for obviously far words.
+# Keep only words whose Levenshtein distance is within MAX_EDIT_DISTANCE. A quick length filter avoids computing distance for obviously far words.
 # ─────────────────────────────────────────────────────────────────────────────
+# Namal are gonna go through each word in ENGLISH_WORDS and then comapre it with each word in our sentence
+# We gonna check leveveve shiii and decide if its wrong or not
 def generate_candidates(misspelled: str) -> list:
-    candidates = []
+    candidates = [] # To store things tht we r gonna send back in return statement
     target_len = len(misspelled)
 
     for word in ENGLISH_WORDS:
@@ -152,6 +149,7 @@ def generate_candidates(misspelled: str) -> list:
             candidates.append({"word": word, "distance": dist})
 
     return candidates
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -171,6 +169,7 @@ def rank_candidates(misspelled: str, candidates: list) -> list:
     return ranked[:MAX_SUGGESTIONS]
 
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 7 — ERROR RECORDING
 # Bundle everything about a detected error into one dict.
@@ -186,25 +185,22 @@ def record_error(token: dict, suggestions: list) -> dict:
     }
 
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # ENDPOINT — POST /check-spelling
 # Runs all 7 steps above and returns the original text + list of errors.
 # ─────────────────────────────────────────────────────────────────────────────
 @app.post("/check-spelling")
 def check_spelling(request: SpellCheckRequest):
-
     # ---------- Step 1 — Preprocess ----------
     text = preprocess(request.text)
-
     # ---------- Step 2 — Tokenize ----------
     tokens = tokenize(text)
-
+    
     errors = []
-
     for token in tokens:
         word = token["clean"]
-
-        # Skip single-character words like "I" or "a" — always valid
+        # Skip single-character words like "I" or "a", usually valid ale 
         if len(word) < 2:
             continue
 
