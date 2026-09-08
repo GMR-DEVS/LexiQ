@@ -1,0 +1,24 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+
+# Environment variables & secrets
+.env*.local
+
+# NLTK data (if downloaded locally)
+nltk_data/
+
+# IDEs & Editors
+.vscode/
+.idea/
+
+# OS generated files
+Thumbs.db
+[Dd]esktop.ini
+.DS_Store
