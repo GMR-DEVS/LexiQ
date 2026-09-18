@@ -91,7 +91,7 @@ def tokenize(text: str) -> list:
 def check_word_in_api(word: str):
     url = f"{DICTIONARY_API_URL}/{word}" # Ithu use cheyth we will rqst to API to send shii
     try: # We check for timeout and connection error specifically and a generic stuff for rest
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, timeout=2)
     except requests.exceptions.Timeout:
         print(f"[API] Timeout for word: {word}")
         return None
@@ -158,16 +158,16 @@ def symspell_candidates(misspelled: str) -> list:
     SymSpell pre-builds a deletion index at startup so this lookup is very fast.
     It returns only words within MAX_EDIT_DISTANCE — no full word list scan needed.
     
-    Returns a list of (word, distance) tuples, same format as generate_candidates().
+    Returns a list of candidate dicts with word, distance, and word frequency.
     Returns empty list if SymSpell is unavailable.
     """
     if sym_spell is None:
         return []
     try:
         suggestions = sym_spell.lookup(
-            misspelled, Verbosity.CLOSEST, max_edit_distance=MAX_EDIT_DISTANCE
+            misspelled, Verbosity.ALL, max_edit_distance=MAX_EDIT_DISTANCE
         )
-        return [{"word": s.term, "distance": s.distance} for s in suggestions]
+        return [{"word": s.term, "distance": s.distance, "count": s.count} for s in suggestions]
     except Exception as e:
         logging.warning(f"SymSpell lookup failed for {misspelled}: {e}")
         return []
@@ -183,7 +183,7 @@ def generate_candidates(misspelled: str) -> list:
 
         dist = levenshtein_distance(misspelled, word)
         if dist <= MAX_EDIT_DISTANCE:
-            candidates.append({"word": word, "distance": dist})
+            candidates.append({"word": word, "distance": dist, "count": 0})
 
     return candidates
 
@@ -193,17 +193,19 @@ def generate_candidates(misspelled: str) -> list:
 # STEP 6 — CANDIDATE RANKING
 # Sort candidates by:
 #   1. Levenshtein distance (lower = better)
-#   2. Length similarity    (closer length = better, as a tie-breaker)
-#   3. Alphabetical order   (final deterministic tie-breaker)
+#   2. Word frequency (higher = better common word, e.g. human over holman)
+#   3. Length similarity    (closer length = better, as a tie-breaker)
+#   4. Alphabetical order   (final deterministic tie-breaker)
 # Return only the top MAX_SUGGESTIONS results.
 # ─────────────────────────────────────────────────────────────────────────────
 def rank_candidates(misspelled: str, candidates: list) -> list:
     target_len = len(misspelled)
     ranked = sorted(
         candidates,
-        key=lambda c: (c["distance"], abs(len(c["word"]) - target_len), c["word"])
+        key=lambda c: (c["distance"], -c.get("count", 0), abs(len(c["word"]) - target_len), c["word"])
     )
-    return ranked[:MAX_SUGGESTIONS]
+    # Return clean list without internal count field
+    return [{"word": c["word"], "distance": c["distance"]} for c in ranked[:MAX_SUGGESTIONS]]
 
 
 
@@ -241,16 +243,19 @@ def check_spelling(request: SpellCheckRequest):
         if len(word) < 2:
             continue
 
-        # ---------- Step 3 — Dictionary API check ----------
+        # ---------- Step 3 — Vocabulary & Dictionary API check ----------
+        # Fast local check first (NLTK vocabulary & SymSpell dictionary)
+        if word in ENGLISH_WORDS or (sym_spell and sym_spell.lookup(word, Verbosity.TOP, max_edit_distance=0)):
+            continue   # word is valid, move on
+
+        # Optional online dictionary check for words not in local corpus
         result = check_word_in_api(word)
 
         if result is True:
-            continue   # word is valid, move on
+            continue   # word confirmed valid by API, move on
 
-        if result is None:
-            continue   # API failed, skip word to avoid false positives
-
-        # Word not found in dictionary — treat as possible spelling error
+        # Word not found in local dictionary (and not confirmed by API)
+        # Treat as a spelling error
         # ---------- Step 4 + 5 — Levenshtein distance + Candidate generation ----------
         
         # Try SymSpell first — it's fast because it uses a pre-built index
