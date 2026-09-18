@@ -8,7 +8,9 @@
 import re
 import requests
 import nltk
-import symspellpy
+from symspellpy import SymSpell, Verbosity
+import pkg_resources
+import logging
 from fastapi import FastAPI
 from pydantic import BaseModel
 
@@ -25,6 +27,19 @@ MAX_SUGGESTIONS     = 5   # how many suggestions to return per error
 
 # FastAPI setup
 app = FastAPI()
+
+try:
+    sym_spell = SymSpell(max_dictionary_edit_distance=MAX_EDIT_DISTANCE, prefix_length=7)
+    dictionary_path = pkg_resources.resource_filename(
+        "symspellpy", "frequency_dictionary_en_82_765.txt"
+    )
+    loaded_ok = sym_spell.load_dictionary(dictionary_path, term_index=0, count_index=1)
+    if not loaded_ok:
+        logging.warning("SymSpell dictionary failed to load.")
+        sym_spell = None
+except Exception as e:
+    logging.warning(f"SymSpell initialization failed: {e}")
+    sym_spell = None
 
 # BaseModel class from Pydantic library to check the format of stuffs
 class SpellCheckRequest(BaseModel):
@@ -136,6 +151,27 @@ def levenshtein_distance(word1: str, word2: str) -> int:
 # ─────────────────────────────────────────────────────────────────────────────
 # Namal are gonna go through each word in ENGLISH_WORDS and then comapre it with each word in our sentence
 # We gonna check leveveve shiii and decide if its wrong or not
+def symspell_candidates(misspelled: str) -> list:
+    """
+    Use SymSpell to quickly get a small pool of candidate corrections.
+    
+    SymSpell pre-builds a deletion index at startup so this lookup is very fast.
+    It returns only words within MAX_EDIT_DISTANCE — no full word list scan needed.
+    
+    Returns a list of (word, distance) tuples, same format as generate_candidates().
+    Returns empty list if SymSpell is unavailable.
+    """
+    if sym_spell is None:
+        return []
+    try:
+        suggestions = sym_spell.lookup(
+            misspelled, Verbosity.CLOSEST, max_edit_distance=MAX_EDIT_DISTANCE
+        )
+        return [{"word": s.term, "distance": s.distance} for s in suggestions]
+    except Exception as e:
+        logging.warning(f"SymSpell lookup failed for {misspelled}: {e}")
+        return []
+
 def generate_candidates(misspelled: str) -> list:
     candidates = [] # To store things tht we r gonna send back in return statement
     target_len = len(misspelled)
@@ -216,7 +252,14 @@ def check_spelling(request: SpellCheckRequest):
 
         # Word not found in dictionary — treat as possible spelling error
         # ---------- Step 4 + 5 — Levenshtein distance + Candidate generation ----------
-        candidates = generate_candidates(word)
+        
+        # Try SymSpell first — it's fast because it uses a pre-built index
+        candidates = symspell_candidates(word)
+        
+        # If SymSpell returned nothing (unavailable or no results), fall back
+        # to the original generate_candidates which scans the full word list
+        if not candidates:
+            candidates = generate_candidates(word)
 
         # ---------- Step 6 — Rank candidates ----------
         suggestions = rank_candidates(word, candidates)
