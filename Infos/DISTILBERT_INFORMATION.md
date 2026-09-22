@@ -1,5 +1,8 @@
 # what is distilbert
     DistilBERT is used to detect contextual errors in sentences through binary token classification. The input text is first converted into tokens using the DistilBERT tokenizer. These tokens are then passed to DistilBERT, which analyzes each word based on the context of the entire sentence.Here we are using distilbert-base-uncased.
+
+# distilbert-base-uncased
+    distilbert-base-uncased is a pretrained, smaller, and faster version of BERT used as the base model in our contextual error detection project. It understands each word by analyzing the surrounding sentence context. The model is fine-tuned for token classification, where 0 represents a contextual error and 1 represents a correct token. It only detects errors and does not correct or replace them.
     
 # workflow of distilbert
 Workflow:-
