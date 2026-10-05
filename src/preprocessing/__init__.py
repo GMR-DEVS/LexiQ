@@ -8,6 +8,7 @@ from .clean_dataset import (
     clean_dataset,
     save_cleaned,
     load_cleaned,
+    sentence_to_token_labels,
 )
 
 __all__ = [
@@ -19,4 +20,5 @@ __all__ = [
     "clean_dataset",
     "save_cleaned",
     "load_cleaned",
+    "sentence_to_token_labels",
 ]

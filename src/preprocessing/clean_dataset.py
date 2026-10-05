@@ -135,3 +135,31 @@ def load_cleaned(path: Union[str, Path]) -> List[Dict]:
             if not line: continue
             records.append(json.loads(line))
     return records
+
+def sentence_to_token_labels(orig: str, corr: str) -> Tuple[List[str], List[str], List[int]]:
+    """
+    Compares original and corrected sentences and aligns them into token-level labels:
+    - 'O': Correct token (binary 1)
+    - 'ERROR': Contextually incorrect / modified / deleted token (binary 0)
+    """
+    import difflib
+    orig_tokens = orig.split()
+    corr_tokens = corr.split()
+
+    matcher = difflib.SequenceMatcher(None, orig_tokens, corr_tokens)
+    labels = ["O"] * len(orig_tokens)
+
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag in ("replace", "delete"):
+            for idx in range(i1, i2):
+                labels[idx] = "ERROR"
+        elif tag == "insert":
+            # Missing token in original sentence; mark adjacent anchor token as ERROR
+            if i1 < len(labels):
+                labels[i1] = "ERROR"
+            elif i1 > 0:
+                labels[i1 - 1] = "ERROR"
+
+    binary_labels = [1 if lbl == "O" else 0 for lbl in labels]
+    return orig_tokens, labels, binary_labels
+

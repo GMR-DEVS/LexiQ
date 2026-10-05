@@ -6,6 +6,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # # This is namade import section, we are importing stuffs like Regular expression for word parsing, requests for making HTTP requests, nltk fro NLP stuffs, FastAPI for API stuffs and Basemodel from pydantic to define what we expect from the API response
 import re
+import difflib
 import requests
 import nltk
 from symspellpy import SymSpell, Verbosity
@@ -48,6 +49,21 @@ class SpellCheckRequest(BaseModel):
 class SpellCheckResponse(BaseModel):
     original_text: str
     errors: list
+
+class ComparisonRequest(BaseModel):
+    original_text: str
+    corrected_text: str
+
+class ComparisonResponse(BaseModel):
+    original_text: str
+    corrected_text: str
+    tokens: list
+    labels: list
+    binary_labels: list
+    similarity_ratio: float
+    diffs: list
+    word_error_rate: float
+    summary: dict
 
 
 
@@ -273,3 +289,99 @@ def check_spelling(request: SpellCheckRequest):
         errors.append(record_error(token, suggestions))
 
     return SpellCheckResponse(original_text=request.text, errors=errors)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 8 — SENTENCE & WORD COMPARISON AND TOKEN LABELING
+# Compares an original (potentially incorrect) text with a corrected version.
+# Uses difflib SequenceMatcher to produce structured diff segments (equal, replace, delete, insert),
+# maps differences to token-level 'O' / 'ERROR' labels (and binary 1/0 for DistilBERT),
+# and calculates Word Error Rate (WER) and similarity metrics.
+# ─────────────────────────────────────────────────────────────────────────────
+def compare_texts(original: str, corrected: str) -> dict:
+    # Tokenize preserving word chunks and punctuation tokens
+    orig_words = re.findall(r"\S+", original)
+    corr_words = re.findall(r"\S+", corrected)
+
+    matcher = difflib.SequenceMatcher(None, orig_words, corr_words)
+    diffs = []
+    labels = ["O"] * len(orig_words)
+    substitutions = 0
+    deletions = 0
+    insertions = 0
+
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        orig_slice = orig_words[i1:i2]
+        corr_slice = corr_words[j1:j2]
+
+        if tag == "equal":
+            diffs.append({
+                "type": "equal",
+                "text": " ".join(orig_slice)
+            })
+        elif tag == "replace":
+            substitutions += max(len(orig_slice), len(corr_slice))
+            diffs.append({
+                "type": "replace",
+                "original": " ".join(orig_slice),
+                "corrected": " ".join(corr_slice)
+            })
+            for idx in range(i1, i2):
+                labels[idx] = "ERROR"
+        elif tag == "delete":
+            deletions += len(orig_slice)
+            diffs.append({
+                "type": "delete",
+                "original": " ".join(orig_slice)
+            })
+            for idx in range(i1, i2):
+                labels[idx] = "ERROR"
+        elif tag == "insert":
+            insertions += len(corr_slice)
+            diffs.append({
+                "type": "insert",
+                "corrected": " ".join(corr_slice)
+            })
+            # When word is missing in original, mark the neighboring anchor token as ERROR
+            if i1 < len(labels):
+                labels[i1] = "ERROR"
+            elif i1 > 0:
+                labels[i1 - 1] = "ERROR"
+
+    # DistilBERT convention: 1 for correct (O), 0 for contextually incorrect (ERROR)
+    binary_labels = [1 if lbl == "O" else 0 for lbl in labels]
+
+    # Word Error Rate (WER): (Substitutions + Deletions + Insertions) / N_orig
+    total_orig_words = len(orig_words)
+    total_edits = substitutions + deletions + insertions
+    wer = round(total_edits / total_orig_words, 4) if total_orig_words > 0 else 0.0
+
+    # Similarity ratio between 0.0 and 1.0
+    similarity = round(matcher.ratio(), 4)
+
+    return {
+        "original_text": original,
+        "corrected_text": corrected,
+        "tokens": orig_words,
+        "labels": labels,
+        "binary_labels": binary_labels,
+        "similarity_ratio": similarity,
+        "diffs": diffs,
+        "word_error_rate": wer,
+        "summary": {
+            "total_original_words": total_orig_words,
+            "total_corrected_words": len(corr_words),
+            "substitutions": substitutions,
+            "deletions": deletions,
+            "insertions": insertions,
+            "total_edits": total_edits
+        }
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ENDPOINT — POST /compare
+# ─────────────────────────────────────────────────────────────────────────────
+@app.post("/compare", response_model=ComparisonResponse)
+def compare_sentences(request: ComparisonRequest):
+    return compare_texts(request.original_text, request.corrected_text)
